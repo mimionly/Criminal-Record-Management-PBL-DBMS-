@@ -1,0 +1,35 @@
+{
+  "name": "cipms-backend",
+  "version": "1.0.0",
+  "description": "REST API server and socket hub for CIPMS",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "dependencies": {
+    "@clerk/clerk-sdk-node": "^4.13.23",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^2.1.1",
+    "mysql2": "^3.9.7",
+    "socket.io": "^4.7.5",
+    "svix": "^1.95.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  },
+  "keywords": [
+    "express",
+    "mysql",
+    "cipms",
+    "socket.io",
+    "api"
+  ],
+  "author": "",
+  "license": "ISC"
+}
