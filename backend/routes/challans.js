@@ -27,7 +27,7 @@ router.get('/all', authenticateToken, authorizeRoles('police'), async (req, res)
 
 // 3. Issue a new challan (Police only)
 router.post('/', authenticateToken, authorizeRoles('police'), async (req, res) => {
-  const { userId, vehicleNo, amount, status } = req.body;
+  const { userId, vehicleNo, reason, amount, status } = req.body;
   if (!vehicleNo || !amount) {
     return res.status(400).json({ error: 'Vehicle number and fine amount are required.' });
   }
@@ -36,6 +36,7 @@ router.post('/', authenticateToken, authorizeRoles('police'), async (req, res) =
     const challanId = await challanModel.createChallan({
       userId: userId ? parseInt(userId, 10) : null,
       vehicleNo,
+      reason,
       amount: parseFloat(amount),
       status
     });

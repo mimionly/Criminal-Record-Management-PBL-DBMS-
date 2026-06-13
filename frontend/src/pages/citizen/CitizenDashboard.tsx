@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { FileText, MapPin, Upload, CheckCircle2, AlertCircle, LogOut, Home, PlusCircle, User, AlertOctagon } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { FileText, MapPin, Upload, CheckCircle2, AlertCircle, LogOut, Home, PlusCircle, User, AlertOctagon, X, CreditCard, Download } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
@@ -7,6 +7,7 @@ import { Select } from '../../components/ui/Select';
 import { useAuth } from '../../context/AuthContext';
 import { MapContainer, TileLayer, Marker, useMapEvents, useMap } from 'react-leaflet';
 import L from 'leaflet';
+import { io, Socket } from 'socket.io-client';
 import 'leaflet/dist/leaflet.css';
 
 // Fix Leaflet marker icon
@@ -37,7 +38,9 @@ interface FIR {
 
 interface Challan {
   id: number;
+  user_id?: number | null;
   vehicle_no: string;
+  reason?: string;
   amount: number;
   status: 'Paid' | 'Unpaid';
   issue_date: string;
@@ -66,11 +69,25 @@ export const CitizenDashboard: React.FC = () => {
   const { token, user, logout } = useAuth();
   
   // Tab control matching user request
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'firs' | 'file' | 'emergency' | 'profile'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'firs' | 'file' | 'emergency' | 'profile' | 'fines'>('dashboard');
   const [firs, setFirs] = useState<FIR[]>([]);
   const [challans, setChallans] = useState<Challan[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedFIR, setSelectedFIR] = useState<FIR | null>(null);
+  
+  // Payment gateway states
+  const [selectedChallanForPayment, setSelectedChallanForPayment] = useState<Challan | null>(null);
+  const [paymentProcessing, setPaymentProcessing] = useState(false);
+
+  // Real-time status update alert states
+  interface FIRStatusNotification {
+    firId: number;
+    title: string;
+    status: string;
+    remarks: string;
+  }
+  const [notification, setNotification] = useState<FIRStatusNotification | null>(null);
+  const socketRef = useRef<Socket | null>(null);
 
   // New Complaint Form States
   const [formTitle, setFormTitle] = useState('');
@@ -167,12 +184,87 @@ export const CitizenDashboard: React.FC = () => {
     }
   };
 
+  const handlePayChallan = async (challanId: number) => {
+    try {
+      setPaymentProcessing(true);
+      // Simulate network request to payment gateway / banking system
+      await new Promise(resolve => setTimeout(resolve, 1500));
+
+      const res = await fetch(`/api/challans/${challanId}/pay`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      if (res.ok) {
+        alert('Payment processed successfully. Fines registry updated.');
+        setSelectedChallanForPayment(null);
+        fetchChallans(); // Reload list
+      } else {
+        alert('Failed to clear traffic fine.');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Payment processing error. Please retry.');
+    } finally {
+      setPaymentProcessing(false);
+    }
+  };
+
+  const handleDownloadReceipt = (challan: Challan) => {
+    const receiptContent = `
+===================================================
+      PRECINCT TRAFFIC VIOLATION PAYMENT RECEIPT
+===================================================
+Receipt Transaction ID: REC-CH-${challan.id}-${Math.floor(1000 + Math.random() * 9000)}
+Challan ID: CH-${challan.id}
+Vehicle Registration No: ${challan.vehicle_no}
+Violation Reason: ${challan.reason || 'Traffic Violation'}
+Complainant / Driver ID: USER-${challan.user_id || 'ANON'}
+Fine Violation Amount: INR ${challan.amount}
+Payment Ledger Status: PAID / ARCHIVED CLEARANCE
+
+Authorized Stamp: Precinct Precinct Administration
+===================================================
+Thank you for your transaction. Keep this receipt copy
+safe for any verification by traffic control patrols.
+===================================================
+    `;
+    const element = document.createElement("a");
+    const file = new Blob([receiptContent.trim()], { type: 'text/plain' });
+    element.href = URL.createObjectURL(file);
+    element.download = `receipt_challan_CH${challan.id}.txt`;
+    document.body.appendChild(element);
+    element.click();
+    document.body.removeChild(element);
+  };
+
   useEffect(() => {
     if (token) {
       fetchFIRs();
       fetchChallans();
+
+      // Establish Socket connections for real-time status change alerts
+      const socket = io('http://localhost:5000');
+      socketRef.current = socket;
+
+      socket.on('fir_status_update', (data: { firId: number; citizenId: number; title: string; status: string; remarks: string }) => {
+        // Only trigger popup if this is the citizen's own FIR complaint
+        if (user && data.citizenId === user.id) {
+          setNotification({
+            firId: data.firId,
+            title: data.title,
+            status: data.status,
+            remarks: data.remarks
+          });
+        }
+      });
+
+      return () => {
+        socket.disconnect();
+      };
     }
-  }, [token]);
+  }, [token, user]);
 
   // Fetch address from latitude and longitude (Reverse Geocoding)
   const fetchAddressFromCoords = async (lat: number, lng: number) => {
@@ -450,7 +542,72 @@ export const CitizenDashboard: React.FC = () => {
     }
   };
   return (
-    <div className="min-h-screen bg-background text-foreground flex font-sans">
+    <div className="min-h-screen bg-background text-foreground flex font-sans relative">
+      {notification && (
+        <div className="fixed inset-0 flex items-center justify-center bg-black/55 backdrop-blur-sm z-50 p-4">
+          <Card className="max-w-md w-full bg-white border border-[#E2E8F0] shadow-2xl p-6 relative rounded-2xl">
+            <button 
+              onClick={() => setNotification(null)}
+              className="absolute top-4 right-4 p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            
+            <div className="flex items-center gap-3 text-[#1E40AF] mb-4">
+              <div className="w-10 h-10 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center shrink-0">
+                <AlertOctagon className="w-5 h-5 text-blue-600" />
+              </div>
+              <div>
+                <h4 className="text-sm font-extrabold uppercase tracking-wide text-slate-800">Case File Status Alert</h4>
+                <p className="text-[10px] text-slate-400 mt-0.5">Real-time Precinct Broadcast</p>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2 text-xs">
+                <div className="flex justify-between items-center flex-wrap gap-2">
+                  <span className="font-mono font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
+                    FIR-{notification.firId}
+                  </span>
+                  <span className={`px-2.5 py-0.5 text-[9px] font-bold rounded-full ${
+                    notification.status === 'Resolved' 
+                      ? 'bg-emerald-55 text-emerald-700 border border-emerald-200'
+                      : 'bg-blue-55 text-blue-700 border border-blue-200'
+                  }`}>
+                    {notification.status === 'Resolved' ? 'Closed' : 'Under Investigation'}
+                  </span>
+                </div>
+                <p className="font-extrabold text-slate-850 text-sm mt-1">{notification.title}</p>
+                <p className="text-slate-600 font-medium leading-relaxed mt-1">
+                  {notification.status === 'Resolved' 
+                    ? 'Your FIR complaint has been resolved and closed by precinct officers.' 
+                    : 'Precision investigation is underway. Officers are reviewing details.'}
+                </p>
+              </div>
+
+              {notification.remarks && (
+                <div className="space-y-1">
+                  <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Precinct Remarks</span>
+                  <p className="text-xs text-slate-700 bg-slate-50 border-l-4 border-[#1E40AF] p-3 rounded-r-xl italic font-medium leading-relaxed">
+                    "{notification.remarks}"
+                  </p>
+                </div>
+              )}
+
+              <Button 
+                variant="primary" 
+                onClick={() => {
+                  setNotification(null);
+                  fetchFIRs(); // Refresh citizen list immediately!
+                }}
+                className="w-full bg-[#1E40AF] text-white py-2.5 rounded-xl font-bold text-xs shadow-md mt-2"
+              >
+                Acknowledge & Sync
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
       
       {/* 1. Sidebar */}
       <aside className="w-64 bg-card text-muted-foreground flex flex-col justify-between shrink-0 border-r border-border">
@@ -493,6 +650,12 @@ export const CitizenDashboard: React.FC = () => {
               <AlertOctagon className="w-4 h-4" />Emergency
             </button>
             <button
+              onClick={() => { setActiveTab('fines'); }}
+              className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-xs font-semibold transition-colors ${activeTab === 'fines' ? 'bg-primary text-primary-foreground shadow-md shadow-primary/10' : 'text-muted-foreground hover:text-foreground hover:bg-muted/40'}`}
+            >
+              <CreditCard className="w-4 h-4" /> Traffic Fines
+            </button>
+            <button
               onClick={() => { setActiveTab('profile'); }}
               className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-xs font-semibold transition-colors ${activeTab === 'profile' ? 'bg-primary text-primary-foreground shadow-md shadow-primary/10' : 'text-muted-foreground hover:text-foreground hover:bg-muted/40'}`}
             >
@@ -531,6 +694,7 @@ export const CitizenDashboard: React.FC = () => {
             {activeTab === 'firs' && 'Track filed FIRs & status updates'}
             {activeTab === 'file' && 'Register New Digital Complaint (Zero-FIR)'}
             {activeTab === 'emergency' && 'Emergency Distress SOS Center'}
+            {activeTab === 'fines' && 'Traffic Violation Fines Ledger'}
             {activeTab === 'profile' && 'Citizen Security Credentials'}
           </h2>
           
@@ -1254,11 +1418,231 @@ export const CitizenDashboard: React.FC = () => {
                   </Card>
                 </div>
               )}
+
+              {/* TRAFFIC FINES TAB */}
+              {activeTab === 'fines' && (
+                <div className="max-w-4xl mx-auto space-y-6">
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <h3 className="text-base font-extrabold text-slate-800">Traffic Challan Registry</h3>
+                      <p className="text-xs text-slate-500 mt-1">Review and settle your traffic violation fines issued to your vehicle records.</p>
+                    </div>
+                    <span className="px-3 py-1 rounded-full bg-slate-100 border border-slate-200 text-xs font-bold text-slate-600">
+                      Total Fines: {challans.length}
+                    </span>
+                  </div>
+
+                  {challans.length > 0 ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      {challans.map((c) => (
+                        <Card key={c.id} className="bg-white border border-[#E2E8F0] shadow-sm hover:shadow-md transition-shadow duration-200 overflow-hidden flex flex-col justify-between">
+                          <div className="p-6 space-y-4">
+                            <div className="flex justify-between items-start">
+                              <div>
+                                <span className="font-mono text-[10px] text-slate-400 font-bold bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                                  #CH-{c.id}
+                                </span>
+                                <h4 className="text-sm font-bold text-slate-800 mt-2 font-mono">{c.vehicle_no}</h4>
+                              </div>
+                              <span className={`px-2.5 py-0.5 text-[10px] font-bold rounded-full border ${
+                                c.status === 'Paid'
+                                  ? 'bg-[#ECFDF5] text-[#10B981] border-[#A7F3D0]'
+                                  : 'bg-[#FFFBEB] text-[#F59E0B] border-[#FDE68A]'
+                              }`}>
+                                {c.status === 'Paid' ? 'Paid' : 'Unpaid'}
+                              </span>
+                            </div>
+
+                            <div>
+                              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Violation Reason</p>
+                              <p className="text-xs text-slate-700 font-semibold mt-0.5">{c.reason || 'Traffic Violation'}</p>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4 pt-2 border-t border-slate-50">
+                              <div>
+                                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Issued Date</p>
+                                <p className="text-[11px] text-slate-600 font-medium mt-0.5">
+                                  {new Date(c.issue_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                                </p>
+                              </div>
+                              <div>
+                                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Fine Amount</p>
+                                <p className="text-sm font-black text-rose-600 mt-0.5">₹{c.amount}</p>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex gap-2">
+                            {c.status === 'Paid' ? (
+                              <Button
+                                variant="secondary"
+                                onClick={() => handleDownloadReceipt(c)}
+                                className="w-full flex items-center justify-center gap-1.5 py-2 text-xs font-bold border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 rounded-xl transition-all"
+                              >
+                                <Download className="w-3.5 h-3.5" /> Download Receipt
+                              </Button>
+                            ) : (
+                              <Button
+                                variant="primary"
+                                onClick={() => setSelectedChallanForPayment(c)}
+                                className="w-full flex items-center justify-center gap-1.5 py-2 text-xs font-bold bg-[#1E40AF] text-white rounded-xl shadow-sm hover:bg-[#1e3a8a] transition-all"
+                              >
+                                <CreditCard className="w-3.5 h-3.5" /> Pay Fine
+                              </Button>
+                            )}
+                          </div>
+                        </Card>
+                      ))}
+                    </div>
+                  ) : (
+                    <Card className="bg-white border border-[#E2E8F0] shadow-sm p-12 text-center">
+                      <div className="w-12 h-12 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto mb-4 border border-emerald-100">
+                        <CheckCircle2 className="w-6 h-6" />
+                      </div>
+                      <h4 className="text-sm font-bold text-slate-800">Clear Records</h4>
+                      <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">No pending traffic fines or challans were found registered to your profile account.</p>
+                    </Card>
+                  )}
+                </div>
+              )}
             </>
           )}
         </main>
       </div>
 
+      {/* Payment Gateway Modal */}
+      {selectedChallanForPayment && (
+        <div className="fixed inset-0 flex items-center justify-center bg-black/60 backdrop-blur-sm z-50 p-4">
+          <Card className="max-w-md w-full bg-white border border-[#E2E8F0] shadow-2xl p-6 relative rounded-2xl">
+            <button 
+              onClick={() => setSelectedChallanForPayment(null)}
+              className="absolute top-4 right-4 p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 transition-colors"
+              disabled={paymentProcessing}
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center gap-3 text-[#1E40AF] mb-6">
+              <div className="w-10 h-10 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center shrink-0">
+                <CreditCard className="w-5 h-5 text-blue-600" />
+              </div>
+              <div>
+                <h4 className="text-sm font-extrabold uppercase tracking-wide text-slate-800">Secure Payment Gateway</h4>
+                <p className="text-[10px] text-slate-400 mt-0.5">Precinct Digital Fine Clearance</p>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              {/* Challan Info Summary */}
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl text-xs space-y-2">
+                <div className="flex justify-between font-mono text-[10px] text-slate-400 font-bold">
+                  <span>Challan Ref: #CH-{selectedChallanForPayment.id}</span>
+                  <span>Vehicle: {selectedChallanForPayment.vehicle_no}</span>
+                </div>
+                <div>
+                  <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider block">Violation Reason</span>
+                  <span className="text-slate-800 font-bold">{selectedChallanForPayment.reason || 'Traffic Violation'}</span>
+                </div>
+                <div className="flex justify-between items-center pt-2 border-t border-slate-200">
+                  <span className="font-bold text-slate-600">Total Payable:</span>
+                  <span className="text-base font-black text-rose-600">₹{selectedChallanForPayment.amount}</span>
+                </div>
+              </div>
+
+              {/* Mock Payment Form */}
+              <form onSubmit={(e) => { e.preventDefault(); handlePayChallan(selectedChallanForPayment.id); }} className="space-y-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Cardholder Name</label>
+                  <Input
+                    type="text"
+                    required
+                    placeholder="Minora Dias"
+                    className="border-slate-200 text-xs py-2 h-10 rounded-xl"
+                    disabled={paymentProcessing}
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Card Number</label>
+                  <Input
+                    type="text"
+                    required
+                    maxLength={19}
+                    placeholder="4111 2222 3333 4444"
+                    className="border-slate-200 text-xs py-2 h-10 rounded-xl font-mono"
+                    disabled={paymentProcessing}
+                    onChange={(e) => {
+                      // format to insert spaces after every 4 digits
+                      const val = e.target.value.replace(/\s/g, '').replace(/(\d{4})/g, '$1 ').trim();
+                      e.target.value = val;
+                    }}
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Expiry Date</label>
+                    <Input
+                      type="text"
+                      required
+                      maxLength={5}
+                      placeholder="MM/YY"
+                      className="border-slate-200 text-xs py-2 h-10 rounded-xl font-mono text-center"
+                      disabled={paymentProcessing}
+                      onChange={(e) => {
+                        const val = e.target.value.replace(/\//g, '');
+                        if (val.length >= 2) {
+                          e.target.value = val.slice(0, 2) + '/' + val.slice(2, 4);
+                        } else {
+                          e.target.value = val;
+                        }
+                      }}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">CVV</label>
+                    <Input
+                      type="password"
+                      required
+                      maxLength={3}
+                      placeholder="123"
+                      className="border-slate-200 text-xs py-2 h-10 rounded-xl font-mono text-center"
+                      disabled={paymentProcessing}
+                    />
+                  </div>
+                </div>
+
+                <div className="flex gap-3 pt-2">
+                  <Button
+                    variant="secondary"
+                    type="button"
+                    onClick={() => setSelectedChallanForPayment(null)}
+                    className="flex-1 border border-slate-200 hover:bg-slate-50 py-2.5 rounded-xl text-xs font-bold text-slate-700"
+                    disabled={paymentProcessing}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="primary"
+                    type="submit"
+                    className="flex-1 bg-[#1E40AF] text-white py-2.5 rounded-xl font-bold text-xs shadow-md flex items-center justify-center gap-1.5"
+                    disabled={paymentProcessing}
+                  >
+                    {paymentProcessing ? (
+                      <>
+                        <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                        Processing...
+                      </>
+                    ) : (
+                      `Authorize ₹${selectedChallanForPayment.amount}`
+                    )}
+                  </Button>
+                </div>
+              </form>
+            </div>
+          </Card>
+        </div>
+      )}
     </div>
   );
 };

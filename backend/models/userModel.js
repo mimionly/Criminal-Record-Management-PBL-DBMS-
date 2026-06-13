@@ -49,10 +49,10 @@ const updateClerkId = async (userId, clerkId) => {
  * @param {string} userDetails.role - User system role.
  * @returns {Promise<number>} The ID of the newly inserted user.
  */
-const createUser = async ({ clerkId, name, email, role }) => {
+const createUser = async ({ clerkId, name, email, role, phone }) => {
   const [result] = await pool.query(
-    'INSERT INTO users (clerk_id, name, email, role) VALUES (?, ?, ?, ?)',
-    [clerkId, name, email, role]
+    'INSERT INTO users (clerk_id, name, email, role, phone) VALUES (?, ?, ?, ?, ?)',
+    [clerkId, name, email, role, phone || null]
   );
   return result.insertId;
 };

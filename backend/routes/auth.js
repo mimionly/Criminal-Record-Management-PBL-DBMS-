@@ -53,10 +53,15 @@ router.post('/sync', authenticateClerkToken, async (req, res) => {
       });
     }
 
-    // 3. If user does not exist by clerk_id or email, create a new user
     try {
       const dbRole = role === 'unauthorized' ? 'citizen' : role;
-      const newUserId = await userModel.createUser({ clerkId, name, email, role: dbRole });
+      const newUserId = await userModel.createUser({ 
+        clerkId, 
+        name, 
+        email, 
+        role: dbRole,
+        phone: req.auth.phone || null
+      });
       console.log(`Created new user in local database: id=${newUserId}, name=${name}, role=${dbRole}`);
 
       if (dbRole === 'police') {

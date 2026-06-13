@@ -5,7 +5,7 @@ export interface User {
   id: number;
   name: string;
   email: string;
-  role: 'citizen' | 'police' 
+  role: 'citizen' | 'police' | 'unauthorized'
 }
 
 interface AuthContextType {

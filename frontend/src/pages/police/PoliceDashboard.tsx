@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Users, UserCheck, Map, AlertCircle, Plus, Send, RefreshCw, BarChart3, Eye, FileSpreadsheet, CreditCard, LogOut } from 'lucide-react';
+import { Users, UserCheck, Map, AlertCircle, Plus, Send, RefreshCw, BarChart3, Eye, FileSpreadsheet, CreditCard, LogOut, Menu, X, ArrowLeft, Download, Paperclip, MessageSquare, Clock, ShieldAlert, FileText, CheckCircle } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
@@ -9,6 +9,7 @@ import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import { io, Socket } from 'socket.io-client';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, LineChart, Line } from 'recharts';
+import { OrganizationSwitcher } from '@clerk/clerk-react';
 import 'leaflet/dist/leaflet.css';
 
 const RecenterMap: React.FC<{ center: [number, number] }> = ({ center }) => {
@@ -42,6 +43,8 @@ interface FIR {
   id: number;
   citizen_id: number;
   citizen_name?: string;
+  citizen_email?: string;
+  citizen_phone?: string;
   title: string;
   description: string;
   location: string;
@@ -50,7 +53,23 @@ interface FIR {
   remarks: string | null;
   accused_name: string | null;
   evidence_url: string | null;
+  priority: 'Low' | 'Medium' | 'High' | 'Emergency';
+  investigation_notes: string | null;
+  assigned_officer_id?: number | null;
+  assigned_officer_name?: string | null;
+  linked_criminal_id?: number | null;
+  linked_criminal_name?: string | null;
   created_at: string;
+}
+
+interface FIRComment {
+  id: number;
+  fir_id: number;
+  user_id: number;
+  comment: string;
+  created_at: string;
+  user_name: string;
+  user_role: string;
 }
 
 interface Case {
@@ -106,6 +125,7 @@ interface Challan {
   user_id: number | null;
   user_name?: string | null;
   vehicle_no: string;
+  reason?: string;
   amount: number;
   status: 'Paid' | 'Unpaid';
   issue_date: string;
@@ -124,6 +144,7 @@ export const PoliceDashboard: React.FC = () => {
   
   // Sidebar tab state
   const [activeTab, setActiveTab] = useState<'dashboard' | 'firs' | 'criminals' | 'roster' | 'challans' | 'reports'>('dashboard');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   
   // Data lists states loaded from MySQL
   const [firs, setFirs] = useState<FIR[]>([]);
@@ -140,16 +161,7 @@ export const PoliceDashboard: React.FC = () => {
 
 
 
-  // Review Status Form States
-  const [selectedFIR, setSelectedFIR] = useState<FIR | null>(null);
-  const [reviewStatus, setReviewStatus] = useState<FIR['status']>('Under Review');
-  const [reviewRemarks, setReviewRemarks] = useState('');
-  
-  // Case Assignment States (linking FIR -> Officer -> Criminal)
-  const [assignFIRId, setAssignFIRId] = useState<string>('');
-  const [assignOfficerId, setAssignOfficerId] = useState<string>('');
-  const [assignCriminalId, setAssignCriminalId] = useState<string>('');
-  const [assignRemarks, setAssignRemarks] = useState('');
+
 
   // Deploy Officer States
   const [deployName, setDeployName] = useState('');
@@ -160,6 +172,201 @@ export const PoliceDashboard: React.FC = () => {
   // Criminal Form States (Add/Edit)
   const [isEditingCriminal, setIsEditingCriminal] = useState(false);
   const [selectedCriminalId, setSelectedCriminalId] = useState<string>('');
+
+  // FIR details view states
+  const [selectedFIRDetail, setSelectedFIRDetail] = useState<FIR | null>(null);
+  const [comments, setComments] = useState<FIRComment[]>([]);
+  const [newCommentText, setNewCommentText] = useState('');
+  const [notesText, setNotesText] = useState('');
+
+  useEffect(() => {
+    if (selectedFIRDetail) {
+      setNotesText(selectedFIRDetail.investigation_notes || '');
+    }
+  }, [selectedFIRDetail]);
+
+  const fetchComments = async (firId: number) => {
+    try {
+      const res = await fetch(`/api/firs/${firId}/comments`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setComments(data);
+      }
+    } catch (err) {
+      console.error('Error fetching comments:', err);
+    }
+  };
+
+  useEffect(() => {
+    if (selectedFIRDetail) {
+      fetchComments(selectedFIRDetail.id);
+    }
+  }, [selectedFIRDetail]);
+
+  useEffect(() => {
+    if (selectedFIRDetail && firs.length > 0) {
+      const updated = firs.find(f => f.id === selectedFIRDetail.id);
+      if (updated) {
+        setSelectedFIRDetail(updated);
+      }
+    }
+  }, [firs]);
+
+  const handleAssignOfficerDetail = async (officerId: number) => {
+    if (!selectedFIRDetail) return;
+    try {
+      const res = await fetch(`/api/firs/${selectedFIRDetail.id}/assign`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ officerId })
+      });
+      if (res.ok) {
+        alert('Officer assigned successfully.');
+        await fetchDashboardData(true);
+      } else {
+        alert('Failed to assign officer.');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Error assigning officer.');
+    }
+  };
+
+  const handleLinkCriminalDetail = async (criminalId: number) => {
+    if (!selectedFIRDetail) return;
+    try {
+      const res = await fetch(`/api/firs/${selectedFIRDetail.id}/assign`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ criminalId })
+      });
+      if (res.ok) {
+        alert('Criminal linked successfully.');
+        await fetchDashboardData(true);
+      } else {
+        alert('Failed to link criminal.');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Error linking criminal.');
+    }
+  };
+
+  const handleUpdateStatusDetail = async (status: FIR['status']) => {
+    if (!selectedFIRDetail) return;
+    try {
+      const res = await fetch(`/api/firs/${selectedFIRDetail.id}/status`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ status, remarks: `Status updated to ${status}` })
+      });
+      if (res.ok) {
+        alert('Status updated successfully.');
+        await fetchDashboardData(true);
+      } else {
+        alert('Failed to update status.');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Error updating status.');
+    }
+  };
+
+  const handleUpdatePriorityDetail = async (priority: FIR['priority']) => {
+    if (!selectedFIRDetail) return;
+    try {
+      const res = await fetch(`/api/firs/${selectedFIRDetail.id}/priority`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ priority })
+      });
+      if (res.ok) {
+        alert('Priority updated successfully.');
+        await fetchDashboardData(true);
+      } else {
+        alert('Failed to update priority.');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Error updating priority.');
+    }
+  };
+
+  const handleSaveNotesDetail = async (notes: string) => {
+    if (!selectedFIRDetail) return;
+    try {
+      const res = await fetch(`/api/firs/${selectedFIRDetail.id}/notes`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ notes })
+      });
+      if (res.ok) {
+        await fetchDashboardData(true);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handlePostComment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedFIRDetail || !newCommentText.trim()) return;
+    try {
+      const res = await fetch(`/api/firs/${selectedFIRDetail.id}/comments`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ comment: newCommentText })
+      });
+      if (res.ok) {
+        setNewCommentText('');
+        fetchComments(selectedFIRDetail.id);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleDownloadEvidence = (url: string) => {
+    const filename = url.split('/').pop() || 'evidence';
+    fetch(url)
+      .then(response => response.blob())
+      .then(blob => {
+        const blobURL = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.style.display = 'none';
+        a.href = blobURL;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(blobURL);
+        document.body.removeChild(a);
+      })
+      .catch(err => {
+        console.error('Download failed:', err);
+        // Fallback to direct window open / navigation
+        window.open(url, '_blank');
+      });
+  };
   const [suspectName, setSuspectName] = useState('');
   const [suspectAge, setSuspectAge] = useState('');
   const [suspectCrime, setSuspectCrime] = useState(''
@@ -171,6 +378,7 @@ export const PoliceDashboard: React.FC = () => {
   const [challanVehicle, setChallanVehicle] = useState('');
   const [challanAmount, setChallanAmount] = useState('');
   const [challanUserId, setChallanUserId] = useState('');
+  const [challanReason, setChallanReason] = useState('');
 
   // Fetch all endpoints from MySQL database
   const fetchDashboardData = async (silent = false) => {
@@ -203,9 +411,6 @@ export const PoliceDashboard: React.FC = () => {
       if (officersRes.ok) {
         const data = await officersRes.json();
         setOfficers(data);
-        if (data.length > 0 && !assignOfficerId) {
-          setAssignOfficerId(data[0].id.toString());
-        }
       }
 
       if (criminalsRes.ok) {
@@ -285,77 +490,7 @@ export const PoliceDashboard: React.FC = () => {
     }
   };
 
-  // Update FIR status
-  const handleUpdateStatus = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedFIR) return;
 
-    try {
-      const res = await fetch(`/api/firs/${selectedFIR.id}/status`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          status: reviewStatus,
-          remarks: reviewRemarks
-        })
-      });
-
-      if (res.ok) {
-        alert('Incident status updated in MySQL.');
-        setReviewRemarks('');
-        setSelectedFIR(null);
-        fetchDashboardData();
-      } else {
-        const data = await res.json();
-        alert(data.error || 'Failed to update FIR.');
-      }
-    } catch (err) {
-      console.error(err);
-      alert('Error updating incident.');
-    }
-  };
-
-  // Case Assignment
-  const handleAssignCase = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!assignFIRId || !assignOfficerId) {
-      alert('FIR and Officer selections required.');
-      return;
-    }
-
-    try {
-      const res = await fetch('/api/cases/assign', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          firId: parseInt(assignFIRId, 10),
-          officerId: parseInt(assignOfficerId, 10),
-          criminalId: assignCriminalId ? parseInt(assignCriminalId, 10) : null,
-          remarks: assignRemarks || 'Case assignment docket'
-        })
-      });
-
-      if (res.ok) {
-        alert('Case assigned and linked successfully.');
-        setAssignFIRId('');
-        setAssignCriminalId('');
-        setAssignRemarks('');
-        fetchDashboardData();
-      } else {
-        const data = await res.json();
-        alert(data.error || 'Assignment failed.');
-      }
-    } catch (err) {
-      console.error(err);
-      alert('Error assigning case.');
-    }
-  };
 
   // Deploy new officer
   const handleDeployOfficer = async (e: React.FormEvent) => {
@@ -466,6 +601,7 @@ export const PoliceDashboard: React.FC = () => {
         body: JSON.stringify({
           userId: challanUserId ? parseInt(challanUserId, 10) : null,
           vehicleNo: challanVehicle,
+          reason: challanReason || 'Traffic Violation',
           amount: parseFloat(challanAmount),
           status: 'Unpaid'
         })
@@ -476,6 +612,7 @@ export const PoliceDashboard: React.FC = () => {
         setChallanVehicle('');
         setChallanAmount('');
         setChallanUserId('');
+        setChallanReason('');
         fetchDashboardData();
       } else {
         alert('Failed to issue challan.');
@@ -527,6 +664,41 @@ export const PoliceDashboard: React.FC = () => {
     }
   };
 
+  const getPriorityBadge = (priority: FIR['priority']) => {
+    switch (priority) {
+      case 'Low':
+        return (
+          <span className="px-2.5 py-0.5 text-[10px] font-bold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+            Low
+          </span>
+        );
+      case 'Medium':
+        return (
+          <span className="px-2.5 py-0.5 text-[10px] font-bold rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+            Medium
+          </span>
+        );
+      case 'High':
+        return (
+          <span className="px-2.5 py-0.5 text-[10px] font-bold rounded-full bg-orange-50 text-orange-700 border border-orange-200">
+            High
+          </span>
+        );
+      case 'Emergency':
+        return (
+          <span className="px-2.5 py-0.5 text-[10px] font-bold rounded-full bg-red-50 text-red-700 border border-red-200 animate-pulse">
+            Emergency
+          </span>
+        );
+      default:
+        return (
+          <span className="px-2.5 py-0.5 text-[10px] font-bold rounded-full bg-slate-50 text-slate-700 border border-slate-200">
+            Low
+          </span>
+        );
+    }
+  };
+
   const getCrimeTypeChartData = () => {
     const counts: { [key: string]: number } = {};
     firs.forEach(f => {
@@ -546,58 +718,173 @@ export const PoliceDashboard: React.FC = () => {
     longitude: Number(e.longitude)
   }));
 
+  const renderEvidenceItem = (url: string) => {
+    if (!url) return null;
+    const urls = url.split(',').map(u => u.trim()).filter(Boolean);
+    return (
+      <div className="space-y-2">
+        {urls.map((singleUrl, idx) => {
+          const isImg = /\.(jpg|jpeg|png|gif)$/i.test(singleUrl);
+          const isVideo = /\.(mp4|webm|ogg|mov)$/i.test(singleUrl);
+          const filename = singleUrl.split('/').pop() || `Evidence File ${idx + 1}`;
+          
+          return (
+            <div key={idx} className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-3.5 bg-slate-50 border border-slate-200 rounded-xl gap-3 text-xs">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-9 h-9 rounded-lg bg-blue-50 border border-blue-100 flex items-center justify-center shrink-0">
+                  {isImg ? (
+                    <Eye className="w-5 h-5 text-blue-600" />
+                  ) : isVideo ? (
+                    <BarChart3 className="w-5 h-5 text-purple-650" />
+                  ) : (
+                    <FileText className="w-5 h-5 text-amber-600" />
+                  )}
+                </div>
+                <div className="min-w-0">
+                  <p className="font-bold text-slate-800 truncate">{filename}</p>
+                  <p className="text-[10px] text-slate-400 font-mono mt-0.5">Real-time database sync</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-center">
+                <Button 
+                  variant="secondary" 
+                  size="sm" 
+                  onClick={() => window.open(singleUrl, '_blank')} 
+                  className="text-blue-600 hover:bg-blue-50 py-1.5 px-2.5 rounded h-8 border border-slate-200 bg-white font-bold text-xs"
+                >
+                  View
+                </Button>
+                <Button 
+                  variant="secondary" 
+                  size="sm" 
+                  onClick={() => handleDownloadEvidence(singleUrl)} 
+                  className="text-slate-650 hover:bg-slate-50 py-1.5 px-2.5 rounded h-8 border border-slate-200 bg-white font-bold text-xs"
+                >
+                  <Download className="w-3.5 h-3.5" /> Download
+                </Button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  const buildTimeline = (fir: FIR) => {
+    const steps = [];
+    
+    // 1. Created
+    steps.push({
+      title: 'FIR Created',
+      date: new Date(fir.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }),
+      description: 'Complaint registered in database by citizen.',
+      done: true
+    });
+    
+    // 2. Assigned
+    const hasOfficer = !!fir.assigned_officer_name;
+    steps.push({
+      title: 'Assigned to Officer',
+      description: hasOfficer ? `Assigned to ${fir.assigned_officer_name}.` : 'Pending officer assignment.',
+      date: hasOfficer ? 'Active' : null,
+      done: hasOfficer
+    });
+
+    // 3. Investigation Started
+    const isInvestigating = ['Investigation Started', 'Under Review', 'Verified', 'Resolved'].includes(fir.status);
+    steps.push({
+      title: 'Investigation Started',
+      description: isInvestigating ? 'Officer has initiated field/CCTV inquiry.' : 'Awaiting status transition.',
+      date: isInvestigating ? 'In Progress' : null,
+      done: isInvestigating
+    });
+
+    // 4. Closed / Rejected
+    const isClosed = fir.status === 'Resolved';
+    const isRejected = fir.status === 'Rejected';
+    steps.push({
+      title: isRejected ? 'Case Rejected' : 'Case Closed',
+      description: isClosed ? 'Resolution filed and docket archived.' : isRejected ? 'Case rejected based on verification.' : 'Awaiting final case closure.',
+      date: (isClosed || isRejected) ? 'Completed' : null,
+      done: isClosed || isRejected
+    });
+
+    return steps;
+  };
+
 
   return (
-    <div className="min-h-screen bg-background text-foreground flex selection:bg-primary/20 font-sans">
+    <div className="min-h-screen bg-background text-foreground flex selection:bg-primary/20 font-sans relative overflow-hidden">
       
-      {/* 1. Sleek Dashboard Sidebar */}
-      <aside className="w-64 bg-card text-muted-foreground flex flex-col justify-between shrink-0 border-r border-border">
+      {/* Sidebar overlay backdrop for mobile */}
+      <div 
+        className={`fixed inset-0 bg-black/40 z-40 transition-opacity duration-300 md:hidden ${
+          isSidebarOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+        }`}
+        onClick={() => setIsSidebarOpen(false)}
+      />
+
+      {/* 1. Sleek Collapsible/Responsive Dashboard Sidebar */}
+      <aside 
+        className={`fixed inset-y-0 left-0 z-50 w-64 bg-card text-muted-foreground flex flex-col justify-between shrink-0 border-r border-border transition-transform duration-300 ease-in-out md:static md:translate-x-0 ${
+          isSidebarOpen ? 'translate-x-0' : '-translate-x-full'
+        }`}
+      >
         <div>
           {/* Brand header */}
-          <div className="p-6 border-b border-border flex items-center gap-3 bg-slate-50/70">
-            <div className="w-8 h-8 rounded-lg overflow-hidden border border-border shrink-0 bg-card flex items-center justify-center">
-              <img src="/logo.jpg" alt="Logo" className="w-full h-full object-cover" />
+          <div className="p-6 border-b border-border flex items-center justify-between bg-slate-50/70">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-lg overflow-hidden border border-border shrink-0 bg-card flex items-center justify-center">
+                <img src="/logo.jpg" alt="Logo" className="w-full h-full object-cover" />
+              </div>
+              <div>
+                <h2 className="text-sm font-black text-foreground leading-none">Criminal Record Control</h2>
+                <p className="text-[9px] text-primary font-bold uppercase mt-1 tracking-wider">Precinct Admin</p>
+              </div>
             </div>
-            <div>
-              <h2 className="text-sm font-black text-foreground leading-none">Criminal Record Control</h2>
-              <p className="text-[9px] text-primary font-bold uppercase mt-1 tracking-wider">Precinct Admin</p>
-            </div>
+            {/* Close button for mobile */}
+            <button 
+              onClick={() => setIsSidebarOpen(false)} 
+              className="p-1 rounded-lg hover:bg-muted text-muted-foreground md:hidden"
+            >
+              <X className="w-5 h-5" />
+            </button>
           </div>
 
           {/* Sidebar Nav links */}
           <nav className="p-4 space-y-1">
             <button
-              onClick={() => setActiveTab('dashboard')}
+              onClick={() => { setActiveTab('dashboard'); setIsSidebarOpen(false); }}
               className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-xs font-semibold transition-colors ${activeTab === 'dashboard' ? 'bg-primary text-primary-foreground shadow-md shadow-primary/10' : 'text-muted-foreground hover:text-foreground hover:bg-muted/40'}`}
             >
               <Map className="w-4 h-4" /> Dashboard
             </button>
             <button
-              onClick={() => setActiveTab('firs')}
+              onClick={() => { setActiveTab('firs'); setIsSidebarOpen(false); }}
               className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-xs font-semibold transition-colors ${activeTab === 'firs' ? 'bg-primary text-primary-foreground shadow-md shadow-primary/10' : 'text-muted-foreground hover:text-foreground hover:bg-muted/40'}`}
             >
               <FileSpreadsheet className="w-4 h-4" /> FIR Incidents
             </button>
             <button
-              onClick={() => setActiveTab('criminals')}
+              onClick={() => { setActiveTab('criminals'); setIsSidebarOpen(false); }}
               className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-xs font-semibold transition-colors ${activeTab === 'criminals' ? 'bg-primary text-primary-foreground shadow-md shadow-primary/10' : 'text-muted-foreground hover:text-foreground hover:bg-muted/40'}`}
             >
               <UserCheck className="w-4 h-4" /> Criminals
             </button>
             <button
-              onClick={() => setActiveTab('roster')}
+              onClick={() => { setActiveTab('roster'); setIsSidebarOpen(false); }}
               className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-xs font-semibold transition-colors ${activeTab === 'roster' ? 'bg-primary text-primary-foreground shadow-md shadow-primary/10' : 'text-muted-foreground hover:text-foreground hover:bg-muted/40'}`}
             >
               <Users className="w-4 h-4" /> Roster Force
             </button>
             <button
-              onClick={() => setActiveTab('challans')}
+              onClick={() => { setActiveTab('challans'); setIsSidebarOpen(false); }}
               className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-xs font-semibold transition-colors ${activeTab === 'challans' ? 'bg-primary text-primary-foreground shadow-md shadow-primary/10' : 'text-muted-foreground hover:text-foreground hover:bg-muted/40'}`}
             >
               <CreditCard className="w-4 h-4" /> Challans
             </button>
             <button
-              onClick={() => setActiveTab('reports')}
+              onClick={() => { setActiveTab('reports'); setIsSidebarOpen(false); }}
               className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-xs font-semibold transition-colors ${activeTab === 'reports' ? 'bg-primary text-primary-foreground shadow-md shadow-primary/10' : 'text-muted-foreground hover:text-foreground hover:bg-muted/40'}`}
             >
               <BarChart3 className="w-4 h-4" /> Reports
@@ -629,31 +916,52 @@ export const PoliceDashboard: React.FC = () => {
       <div className="flex-1 flex flex-col min-w-0">
         
         {/* Navbar */}
-        <header className="h-16 bg-card border-b border-border px-8 flex justify-between items-center shadow-sm shrink-0">
-          <h2 className="text-sm font-extrabold uppercase tracking-wide text-foreground">
-            {activeTab === 'dashboard' && 'Precinct Operations Command'}
-            {activeTab === 'firs' && 'FIR Incidents & Assign Queue'}
-            {activeTab === 'criminals' && 'Criminal Registry database'}
-            {activeTab === 'roster' && 'On-Duty Station Officer Roster'}
-            {activeTab === 'challans' && 'Traffic violations & fine logs'}
-            {activeTab === 'reports' && 'Precinct Analytics & crime charts'}
-          </h2>
-            <Button variant="secondary" size="sm" onClick={() => fetchDashboardData()} className="px-2 border border-border text-foreground hover:bg-muted">
+        <header className="h-16 bg-card border-b border-border px-4 sm:px-6 lg:px-8 flex justify-between items-center shadow-sm shrink-0 gap-4">
+          <div className="flex items-center gap-3 min-w-0">
+            {/* Hamburger button */}
+            <button
+              onClick={() => setIsSidebarOpen(true)}
+              className="p-2 -ml-2 rounded-lg hover:bg-muted text-muted-foreground md:hidden shrink-0"
+              aria-label="Open sidebar drawer"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+            <h2 className="text-xs sm:text-sm font-extrabold uppercase tracking-wide text-foreground truncate">
+              {activeTab === 'dashboard' && 'Precinct Operations Command'}
+              {activeTab === 'firs' && 'FIR Incidents & Assign Queue'}
+              {activeTab === 'criminals' && 'Criminal Registry database'}
+              {activeTab === 'roster' && 'On-Duty Station Officer Roster'}
+              {activeTab === 'challans' && 'Traffic violations & fine logs'}
+              {activeTab === 'reports' && 'Precinct Analytics & crime charts'}
+            </h2>
+          </div>
+          
+          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+            <OrganizationSwitcher 
+              appearance={{
+                elements: {
+                  rootBox: "text-xs font-medium",
+                  organizationSwitcherTrigger: "border border-border rounded-xl px-2 sm:px-3 py-1.5 hover:bg-muted text-xs font-bold text-foreground h-9"
+                }
+              }}
+            />
+            <Button variant="secondary" size="sm" onClick={() => fetchDashboardData()} className="h-9 px-2.5 border border-border text-foreground hover:bg-muted">
               <RefreshCw className="w-3.5 h-3.5" />
             </Button>
+          </div>
         </header>
 
         {/* Scrollable Main content area */}
-        <main className="flex-1 p-8 overflow-y-auto space-y-8 w-full">
+        <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto space-y-6 lg:space-y-8 w-full">
           
           {loading ? (
             <div className="p-12 text-center text-xs text-slate-400 animate-pulse">Synchronizing database...</div>
           ) : (
             <>
               {activeTab === 'dashboard' && (
-                <div className="space-y-8">
+                <div className="space-y-6 lg:space-y-8">
                   {/* Status counters */}
-                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                     <Card className="bg-white border border-[#E2E8F0] p-4 text-center">
                       <p className="text-[10px] text-slate-400 font-bold uppercase">Outstanding complaints</p>
                       <p className="text-2xl font-black text-[#F59E0B] mt-1">{firs.filter(f => f.status === 'Submitted' || f.status === 'Under Review').length}</p>
@@ -673,7 +981,7 @@ export const PoliceDashboard: React.FC = () => {
                   </div>
 
                   {/* SOS beacons section */}
-                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8 items-start">
                     
                     {/* SOS distress list */}
                     <Card className="lg:col-span-1 bg-white border border-[#E2E8F0]">
@@ -685,17 +993,17 @@ export const PoliceDashboard: React.FC = () => {
                       <CardContent className="p-0 max-h-[300px] overflow-y-auto divide-y divide-[#E2E8F0]">
                         {activeSOSList.length > 0 ? (
                           activeSOSList.map(e => (
-                            <div key={e.id} className="p-4 hover:bg-slate-50/50 flex justify-between items-center text-xs">
-                              <div className="space-y-1">
-                                <div className="flex items-center gap-2">
+                            <div key={e.id} className="p-4 hover:bg-slate-50/50 flex flex-col sm:flex-row justify-between sm:items-center gap-3 text-xs">
+                              <div className="space-y-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
                                   <span className="font-bold text-[#DC2626] uppercase text-[9px]">{e.request_type}</span>
                                   <span className="text-[9px] text-slate-400">{new Date(e.created_at).toLocaleTimeString()}</span>
                                 </div>
-                                <p className="font-semibold text-slate-800">Alert #{e.id}: {e.user_name || 'Citizen'}</p>
+                                <p className="font-semibold text-slate-800 truncate">Alert #{e.id}: {e.user_name || 'Citizen'}</p>
                                 <p className="text-[9px] text-slate-400 font-mono">GPS: {e.latitude.toFixed(5)}, {e.longitude.toFixed(5)}</p>
                               </div>
 
-                              <div className="flex items-center gap-1.5">
+                              <div className="flex items-center gap-1.5 sm:self-center self-end shrink-0">
                                 {e.status === 'Active' ? (
                                   <Button variant="danger" size="sm" onClick={() => handleDispatchResponder(e.id, 'Dispatched')} className="bg-[#DC2626] text-white text-[10px] font-bold py-1 px-2.5 rounded">
                                     Dispatch
@@ -726,7 +1034,7 @@ export const PoliceDashboard: React.FC = () => {
                     </Card>
 
                     {/* SOS Map panel */}
-                    <Card className="lg:col-span-2 bg-white border border-[#E2E8F0] h-[360px] overflow-hidden">
+                    <Card className="lg:col-span-2 bg-white border border-[#E2E8F0] h-[300px] sm:h-[360px] overflow-hidden">
                       <MapContainer center={mapCenter} zoom={12} style={{ height: '100%', width: '100%' }}>
                         <RecenterMap center={mapCenter} />
                         <TileLayer
@@ -754,177 +1062,435 @@ export const PoliceDashboard: React.FC = () => {
               )}
 
               {activeTab === 'firs' && (
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                  {/* FIR Table */}
-                  <Card className="lg:col-span-2 bg-white border border-[#E2E8F0]">
-                    <CardHeader className="border-b border-[#E2E8F0]">
-                      <CardTitle className="text-sm font-bold flex items-center gap-2">
-                        <FileSpreadsheet className="w-4.5 h-4.5 text-[#1E40AF]" /> Active Assigned FIR Complaints
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="p-0">
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-left text-xs">
-                          <thead>
-                            <tr className="bg-slate-50 border-b border-[#E2E8F0] text-slate-500 font-bold uppercase">
-                              <th className="py-3 px-6">FIR ID</th>
-                              <th className="py-3 px-6">Incident details</th>
-                              <th className="py-3 px-6">Type</th>
-                              <th className="py-3 px-6">Status</th>
-                              <th className="py-3 px-6 text-right">Review</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-[#E2E8F0]">
-                            {firs.map(f => (
-                              <tr key={f.id} className="hover:bg-slate-50/50 transition-colors">
-                                <td className="py-3.5 px-6 font-mono font-bold text-slate-500">#{f.id}</td>
-                                <td className="py-3.5 px-6">
-                                  <p className="font-semibold text-slate-800">{f.title}</p>
-                                  <p className="text-[10px] text-slate-400 mt-0.5">Location: {f.location}</p>
-                                </td>
-                                <td className="py-3.5 px-6 text-slate-600">{f.crime_type}</td>
-                                <td className="py-3.5 px-6">{getStatusBadge(f.status)}</td>
-                                <td className="py-3.5 px-6 text-right">
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => { setSelectedFIR(f); setReviewStatus(f.status); setReviewRemarks(f.remarks || ''); }}
-                                    className="text-blue-600 hover:bg-blue-50 font-bold text-xs"
-                                  >
-                                    Review
-                                  </Button>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
+                selectedFIRDetail ? (
+                  /* --------------------- DETAILED WORKSPACE VIEW --------------------- */
+                  <div className="space-y-6">
+                    {/* Workspace Header Panel */}
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-white border border-[#E2E8F0] p-5 rounded-2xl shadow-sm gap-4">
+                      <div className="flex items-center gap-4 min-w-0">
+                        <Button 
+                          variant="secondary" 
+                          size="sm" 
+                          onClick={() => setSelectedFIRDetail(null)}
+                          className="flex items-center gap-1.5 border border-slate-200 text-slate-700 bg-white hover:bg-slate-50 shrink-0 font-bold text-xs"
+                        >
+                          <ArrowLeft className="w-4 h-4" /> Back to List
+                        </Button>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-mono text-xs font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                              FIR-{selectedFIRDetail.id}
+                            </span>
+                            {getStatusBadge(selectedFIRDetail.status)}
+                            {getPriorityBadge(selectedFIRDetail.priority)}
+                          </div>
+                          <h3 className="text-base font-extrabold text-slate-800 truncate mt-1">
+                            {selectedFIRDetail.title}
+                          </h3>
+                        </div>
                       </div>
-                    </CardContent>
-                  </Card>
+                      
+                      {/* Case shortcut buttons */}
+                      <div className="flex gap-2 shrink-0 w-full sm:w-auto">
+                        {selectedFIRDetail.status !== 'Resolved' && (
+                          <Button 
+                            variant="primary" 
+                            size="sm" 
+                            onClick={() => handleUpdateStatusDetail('Resolved')}
+                            className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex-1 sm:flex-initial"
+                          >
+                            <CheckCircle className="w-3.5 h-3.5 mr-1 inline-block" /> Close Case
+                          </Button>
+                        )}
+                        {selectedFIRDetail.status !== 'Rejected' && selectedFIRDetail.status !== 'Resolved' && (
+                          <Button 
+                            variant="danger" 
+                            size="sm" 
+                            onClick={() => handleUpdateStatusDetail('Rejected')}
+                            className="bg-red-650 hover:bg-red-700 text-white font-bold text-xs flex-1 sm:flex-initial"
+                          >
+                            <X className="w-3.5 h-3.5 mr-1 inline-block" /> Reject Case
+                          </Button>
+                        )}
+                      </div>
+                    </div>
 
-                  {/* Actions column */}
-                  <div className="space-y-8">
-                    
-                    {/* Status updater */}
-                    <Card className="bg-white border border-[#E2E8F0]">
-                      <CardHeader className="border-b border-[#E2E8F0]">
-                        <CardTitle className="text-sm font-bold flex items-center gap-1.5">
-                          <Eye className="w-4 h-4 text-[#1E40AF]" /> Update Incident Status
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent className="pt-6">
-                        {selectedFIR ? (
-                          <form onSubmit={handleUpdateStatus} className="space-y-4">
-                            <div className="p-3 bg-slate-50 border border-[#E2E8F0] rounded-xl text-xs space-y-1">
-                              <p className="text-[9px] text-slate-400 font-bold uppercase">Active FIR docket</p>
-                              <p className="font-bold text-slate-800">FIR #{selectedFIR.id}: {selectedFIR.title}</p>
+                    {/* Main Split Grid */}
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+                      
+                      {/* Left Side Workspace (Citizen details, Statement, Evidence, Comments) */}
+                      <div className="lg:col-span-2 space-y-6">
+                        
+                        {/* Complaint details card */}
+                        <Card className="bg-white border border-[#E2E8F0]">
+                          <CardHeader className="border-b border-[#E2E8F0] py-4">
+                            <CardTitle className="text-xs font-extrabold text-slate-700 uppercase tracking-wider">
+                              Complaint & Citizen Contact Info
+                            </CardTitle>
+                          </CardHeader>
+                          <CardContent className="pt-6 space-y-6">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                              <div className="p-3 bg-slate-50 rounded-xl border border-slate-100 text-xs space-y-1">
+                                <span className="text-[10px] text-slate-400 font-bold uppercase">Incident Date</span>
+                                <p className="font-bold text-slate-800">
+                                  {new Date(selectedFIRDetail.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}
+                                </p>
+                              </div>
+                              <div className="p-3 bg-slate-50 rounded-xl border border-slate-100 text-xs space-y-1">
+                                <span className="text-[10px] text-slate-400 font-bold uppercase">Incident Location</span>
+                                <p className="font-bold text-slate-800">{selectedFIRDetail.location}</p>
+                              </div>
                             </div>
 
+                            <div className="border-t border-slate-100 pt-6">
+                              <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Citizen Info</h4>
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
+                                <div className="space-y-1">
+                                  <span className="text-[9px] text-slate-400 font-bold uppercase">Name</span>
+                                  <p className="font-bold text-slate-800">{selectedFIRDetail.citizen_name || 'Anonymous'}</p>
+                                </div>
+                                <div className="space-y-1">
+                                  <span className="text-[9px] text-slate-400 font-bold uppercase">Phone</span>
+                                  <p className="font-bold text-slate-800">{selectedFIRDetail.citizen_phone || 'Not Registered'}</p>
+                                </div>
+                                <div className="space-y-1">
+                                  <span className="text-[9px] text-slate-400 font-bold uppercase">Email</span>
+                                  <p className="font-bold text-slate-800">{selectedFIRDetail.citizen_email || 'Not Registered'}</p>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="border-t border-slate-100 pt-6">
+                              <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Statement / Incident Description</h4>
+                              <div className="p-4 bg-slate-50 border-l-4 border-primary rounded-r-xl text-xs text-slate-700 italic font-medium leading-relaxed">
+                                "{selectedFIRDetail.description}"
+                              </div>
+                            </div>
+                          </CardContent>
+                        </Card>
+
+                        {/* Evidence Uploads Card */}
+                        <Card className="bg-white border border-[#E2E8F0]">
+                          <CardHeader className="border-b border-[#E2E8F0] py-4 flex flex-row items-center justify-between">
+                            <CardTitle className="text-xs font-extrabold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                              <Paperclip className="w-4 h-4 text-primary" /> Citizen Uploaded Evidence
+                            </CardTitle>
+                          </CardHeader>
+                          <CardContent className="pt-6 space-y-3">
+                            {/* Render actual uploaded media file if exists */}
+                            {selectedFIRDetail.evidence_url ? (
+                              renderEvidenceItem(selectedFIRDetail.evidence_url)
+                            ) : (
+                              <p className="text-xs text-slate-400 italic">No custom evidence documents uploaded by the citizen.</p>
+                            )}
+                          </CardContent>
+                        </Card>
+
+                        {/* Comments / Correspondence feed */}
+                        <Card className="bg-white border border-[#E2E8F0] flex flex-col h-[400px]">
+                          <CardHeader className="border-b border-[#E2E8F0] py-4 flex flex-row items-center justify-between shrink-0">
+                            <CardTitle className="text-xs font-extrabold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                              <MessageSquare className="w-4 h-4 text-primary" /> Police ↔ Citizen Comments Log
+                            </CardTitle>
+                            <span className="px-2 py-0.5 text-[9px] font-bold rounded-full bg-slate-100 text-slate-500">
+                              {comments.length} Messages
+                            </span>
+                          </CardHeader>
+                          <CardContent className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50/20 flex flex-col">
+                            {comments.length > 0 ? (
+                              comments.map(c => {
+                                const isOfficer = ['police', 'inspector', 'admin'].includes(c.user_role);
+                                return (
+                                  <div 
+                                    key={c.id}
+                                    className={`flex flex-col max-w-[85%] p-3.5 rounded-2xl shadow-sm text-xs border ${
+                                      isOfficer 
+                                        ? 'bg-blue-50/80 text-slate-800 border-blue-200 rounded-tr-none self-end ml-auto'
+                                        : 'bg-white text-slate-800 border-slate-200 rounded-tl-none self-start mr-auto'
+                                    }`}
+                                  >
+                                    <div className="flex items-center gap-1.5 flex-wrap mb-1">
+                                      <span className="font-bold text-slate-700">{c.user_name}</span>
+                                      <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase ${
+                                        isOfficer ? 'bg-blue-100 text-blue-800' : 'bg-slate-150 text-slate-600'
+                                      }`}>
+                                        {c.user_role}
+                                      </span>
+                                      <span className="text-[8px] text-slate-400 font-mono ml-auto">
+                                        {new Date(c.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                      </span>
+                                    </div>
+                                    <p className="leading-relaxed font-medium break-words">{c.comment}</p>
+                                  </div>
+                                );
+                              })
+                            ) : (
+                              <div className="m-auto text-slate-400 text-xs py-8 text-center">
+                                No comments posted. Send a request or query to the citizen using the input field below.
+                              </div>
+                            )}
+                          </CardContent>
+                          <form onSubmit={handlePostComment} className="flex gap-2 p-3 border-t border-[#E2E8F0] bg-slate-50/40 shrink-0">
+                            <Input
+                              type="text"
+                              placeholder="Message details..."
+                              value={newCommentText}
+                              onChange={(e) => setNewCommentText(e.target.value)}
+                              className="bg-white border-slate-200 text-xs py-2 h-10 rounded-xl"
+                              required
+                            />
+                            <Button type="submit" variant="primary" className="bg-[#1E40AF] text-white py-2 px-4 h-10 rounded-xl flex items-center gap-1.5 shrink-0 font-bold text-xs shadow-md">
+                              <Send className="w-3.5 h-3.5" /> Send
+                            </Button>
+                          </form>
+                        </Card>
+                      </div>
+
+                      {/* Right Side Control Workspace (Actions, Notes, Timeline) */}
+                      <div className="space-y-6">
+                        
+                        {/* Case management actions card */}
+                        <Card className="bg-white border border-[#E2E8F0]">
+                          <CardHeader className="border-b border-[#E2E8F0] py-4">
+                            <CardTitle className="text-xs font-extrabold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                              <ShieldAlert className="w-4 h-4 text-primary" /> Incident Actions Panel
+                            </CardTitle>
+                          </CardHeader>
+                          <CardContent className="pt-6 space-y-4">
+                            {/* Update Status Selection */}
                             <div className="space-y-1">
-                              <label className="text-xs font-bold text-slate-600">Transition Status</label>
-                              <Select value={reviewStatus} onChange={(e) => setReviewStatus(e.target.value as FIR['status'])}>
+                              <label className="text-xs font-bold text-slate-600">Update Status</label>
+                              <Select 
+                                value={selectedFIRDetail.status} 
+                                onChange={(e) => handleUpdateStatusDetail(e.target.value as FIR['status'])}
+                                className="text-xs"
+                              >
                                 <option value="Submitted">Pending</option>
-                                <option value="Pending Review">Pending Review</option>
+                                <option value="Pending Review">Need More Information</option>
                                 <option value="Under Review">Under Review</option>
-                                <option value="Verified">Verified</option>
+                                <option value="Verified">Verified Case</option>
                                 <option value="Investigation Started">Under Investigation</option>
                                 <option value="Resolved">Closed</option>
                                 <option value="Rejected">Rejected</option>
                               </Select>
                             </div>
 
+                            {/* Update Priority Selection */}
                             <div className="space-y-1">
-                              <label className="text-xs font-bold text-slate-600">Investigation remarks</label>
-                              <textarea
-                                rows={4}
-                                required
-                                placeholder="remarks details..."
-                                className="flex w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs shadow-sm placeholder:text-slate-400 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500 text-slate-800"
-                                value={reviewRemarks}
-                                onChange={(e) => setReviewRemarks(e.target.value)}
-                              />
+                              <label className="text-xs font-bold text-slate-600">Priority Level</label>
+                              <Select 
+                                value={selectedFIRDetail.priority} 
+                                onChange={(e) => handleUpdatePriorityDetail(e.target.value as FIR['priority'])}
+                                className="text-xs"
+                              >
+                                <option value="Low">Low</option>
+                                <option value="Medium">Medium</option>
+                                <option value="High">High</option>
+                                <option value="Emergency">Emergency</option>
+                              </Select>
                             </div>
 
-                            <div className="flex gap-2 justify-end">
-                              <Button variant="secondary" size="sm" type="button" onClick={() => setSelectedFIR(null)}>
-                                Cancel
-                              </Button>
-                              <Button variant="primary" size="sm" type="submit" className="bg-[#1E40AF] text-white">
-                                Save updates
-                              </Button>
-                            </div>
-                          </form>
-                        ) : (
-                          <div className="p-6 text-center text-xs text-slate-400">Select an incident from grid.</div>
-                        )}
-                      </CardContent>
-                    </Card>
-
-                    {/* Case assignment Attach FIR -> Criminal */}
-                    <Card className="bg-white border border-[#E2E8F0]">
-                      <CardHeader className="border-b border-[#E2E8F0]">
-                        <CardTitle className="text-sm font-bold flex items-center gap-1.5">
-                          <Send className="w-4 h-4 text-[#1E40AF]" /> Case assignment & Docket Linking
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent className="pt-6">
-                        <form onSubmit={handleAssignCase} className="space-y-4">
-                          <div className="space-y-1">
-                            <label className="text-xs font-bold text-slate-600">Attach FIR Incident</label>
-                            <Select value={assignFIRId} onChange={(e) => setAssignFIRId(e.target.value)}>
-                              <option value="">-- Choose FIR --</option>
-                              {firs
-                                .filter(f => !cases.some(c => c.fir_id === f.id))
-                                .map(f => (
-                                  <option key={f.id} value={f.id}>
-                                    FIR #{f.id}: {f.title}
-                                  </option>
-                                ))}
-                            </Select>
-                          </div>
-
-                          <div className="space-y-1">
-                            <label className="text-xs font-bold text-slate-600">Link Suspect Criminal (Optional)</label>
-                            <Select value={assignCriminalId} onChange={(e) => setAssignCriminalId(e.target.value)}>
-                              <option value="">-- Choose suspect criminal --</option>
-                              {criminals.map(c => (
-                                <option key={c.id} value={c.id}>
-                                  {c.name} (Crime: {c.crime_type})
-                                </option>
-                              ))}
-                            </Select>
-                          </div>
-
-                          <div className="space-y-1">
-                            <label className="text-xs font-bold text-slate-600">Deploy Officer</label>
-                            <Select value={assignOfficerId} onChange={(e) => setAssignOfficerId(e.target.value)}>
-                              {officers
-                                .filter(o => o.status !== 'On Leave')
-                                .map(o => (
+                            {/* Officer Assignment Dropdown */}
+                            <div className="space-y-1 pt-3 border-t border-slate-100">
+                              <label className="text-xs font-bold text-slate-600">Assign Officer (assigned_officer_id)</label>
+                              <Select 
+                                value={selectedFIRDetail.assigned_officer_id?.toString() || ""} 
+                                onChange={(e) => {
+                                  if (e.target.value) {
+                                    handleAssignOfficerDetail(parseInt(e.target.value, 10));
+                                  }
+                                }}
+                                className="text-xs font-semibold"
+                              >
+                                <option value="">-- Choose officer to assign --</option>
+                                {officers.map(o => (
                                   <option key={o.id} value={o.id}>
-                                    {o.name} ({o.rank} - {o.activeCases} active cases)
+                                    {o.name} ({o.rank} - {o.activeCases} cases)
                                   </option>
                                 ))}
-                            </Select>
-                          </div>
+                              </Select>
+                              {selectedFIRDetail.assigned_officer_name && (
+                                <p className="text-[10px] text-slate-500 font-semibold mt-1">
+                                  In Charge: <span className="text-primary font-bold">{selectedFIRDetail.assigned_officer_name}</span>
+                                </p>
+                              )}
+                            </div>
 
-                          <Button variant="primary" type="submit" className="w-full bg-[#1E40AF] text-white">
-                            Dispatch docket
-                          </Button>
-                        </form>
-                      </CardContent>
-                    </Card>
+                            {/* Link Criminal Record Selector */}
+                            <div className="space-y-1 pt-3 border-t border-slate-100">
+                              <label className="text-xs font-bold text-slate-600">Link Suspect Criminal Record</label>
+                              <div className="flex gap-2">
+                                <Select 
+                                  value={selectedCriminalId} 
+                                  onChange={(e) => setSelectedCriminalId(e.target.value)}
+                                  className="text-xs flex-1"
+                                >
+                                  <option value="">-- Select Suspect --</option>
+                                  {criminals.map(c => (
+                                    <option key={c.id} value={c.id}>
+                                      {c.name} (Offense: {c.crime_type})
+                                    </option>
+                                  ))}
+                                </Select>
+                                <Button
+                                  variant="primary"
+                                  size="sm"
+                                  onClick={() => {
+                                    if (selectedCriminalId) {
+                                      handleLinkCriminalDetail(parseInt(selectedCriminalId, 10));
+                                      setSelectedCriminalId("");
+                                    } else {
+                                      alert("Please choose a suspect criminal profile first.");
+                                    }
+                                  }}
+                                  className="bg-[#1E40AF] text-white text-[10px] py-1.5 px-2.5 h-9 shrink-0 font-bold rounded-lg shadow-sm"
+                                >
+                                  Link Criminal
+                                </Button>
+                              </div>
+                              {selectedFIRDetail.linked_criminal_name && (
+                                <p className="text-[10px] text-slate-500 font-semibold mt-1">
+                                  Attached Suspect: <span className="text-purple-600 font-bold">{selectedFIRDetail.linked_criminal_name}</span>
+                                </p>
+                              )}
+                            </div>
+                          </CardContent>
+                        </Card>
 
+                        {/* Investigation notes card */}
+                        <Card className="bg-white border border-[#E2E8F0]">
+                          <CardHeader className="border-b border-[#E2E8F0] py-4 flex items-center justify-between">
+                            <CardTitle className="text-xs font-extrabold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                              <FileText className="w-4 h-4 text-primary" /> Investigation Notes
+                            </CardTitle>
+                            <span className="text-[9px] font-mono text-slate-400 bg-slate-50 px-1 py-0.5 rounded border border-slate-150">investigation_notes</span>
+                          </CardHeader>
+                          <CardContent className="pt-6 space-y-4">
+                            <textarea
+                              rows={5}
+                              placeholder="Write log notes here..."
+                              className="flex w-full rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500 text-slate-800 font-medium leading-relaxed"
+                              value={notesText}
+                              onChange={(e) => setNotesText(e.target.value)}
+                            />
+                            <Button
+                              variant="primary"
+                              onClick={() => {
+                                handleSaveNotesDetail(notesText);
+                                alert("Investigation notes saved successfully.");
+                              }}
+                              className="w-full bg-[#1E40AF] hover:bg-[#1e3a8a] text-white text-xs font-bold py-2.5 px-4 rounded-xl shadow-md"
+                            >
+                              Add Note / Save
+                            </Button>
+                          </CardContent>
+                        </Card>
 
+                        {/* Case Timeline Stepper */}
+                        <Card className="bg-white border border-[#E2E8F0]">
+                          <CardHeader className="border-b border-[#E2E8F0] py-4">
+                            <CardTitle className="text-xs font-extrabold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                              <Clock className="w-4 h-4 text-primary" /> Visual case Timeline
+                            </CardTitle>
+                          </CardHeader>
+                          <CardContent className="pt-6">
+                            <div className="relative pl-6 border-l-2 border-slate-100 space-y-5">
+                              {buildTimeline(selectedFIRDetail).map((step, idx) => (
+                                <div key={idx} className="relative">
+                                  <span className={`absolute -left-[31px] top-0.5 w-4.5 h-4.5 rounded-full border-2 bg-white flex items-center justify-center ${
+                                    step.done 
+                                      ? 'border-emerald-500 text-emerald-500 font-bold' 
+                                      : 'border-slate-200 text-slate-300'
+                                  }`}>
+                                    <span className={`w-2 h-2 rounded-full ${step.done ? 'bg-emerald-500' : 'bg-slate-200'}`} />
+                                  </span>
+                                  <div>
+                                    <div className="flex items-center justify-between gap-2">
+                                      <h5 className={`text-xs font-bold ${step.done ? 'text-slate-800' : 'text-slate-400'}`}>
+                                        {step.title}
+                                      </h5>
+                                      {step.date && (
+                                        <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded uppercase ${
+                                          step.date === 'Active' || step.date === 'In Progress'
+                                            ? 'bg-blue-50 text-blue-600 border border-blue-100'
+                                            : step.date === 'Completed'
+                                            ? 'bg-emerald-50 text-emerald-600 border border-emerald-100'
+                                            : 'bg-slate-100 text-slate-500'
+                                        }`}>
+                                          {step.date}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <p className="text-[10px] text-slate-450 mt-0.5 leading-relaxed">
+                                      {step.description}
+                                    </p>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </CardContent>
+                        </Card>
+                      </div>
 
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  /* --------------------- COMPACT LEDGER TABLE VIEW --------------------- */
+                  <Card className="bg-white border border-[#E2E8F0] overflow-hidden shadow-sm">
+                    <CardHeader className="border-b border-[#E2E8F0] flex justify-between items-start sm:items-center px-6 py-4 flex-col sm:flex-row gap-4 bg-slate-50/40">
+                      <div>
+                        <CardTitle className="text-sm font-bold flex items-center gap-2">
+                          <FileSpreadsheet className="w-4.5 h-4.5 text-[#1E40AF]" /> Complaint FIR Ledger List
+                        </CardTitle>
+                        <p className="text-[10px] text-slate-400 mt-1 font-semibold">Click any row below to open the dedicated officer workspace and investigate details</p>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="p-0">
+                      <div className="overflow-x-auto w-full">
+                        <table className="w-full text-left text-xs min-w-[600px] table-layout-fixed">
+                          <thead>
+                            <tr className="bg-slate-50 border-b border-[#E2E8F0] text-slate-500 font-bold uppercase select-none">
+                              <th className="py-3.5 px-6 w-24">FIR ID</th>
+                              <th className="py-3.5 px-6">Citizen</th>
+                              <th className="py-3.5 px-6">Status</th>
+                              <th className="py-3.5 px-6">Priority</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-[#E2E8F0]">
+                            {firs.length > 0 ? (
+                              firs.map(f => (
+                                <tr 
+                                  key={f.id} 
+                                  className="hover:bg-slate-50/70 cursor-pointer transition-colors"
+                                  onClick={() => setSelectedFIRDetail(f)}
+                                >
+                                  <td className="py-4 px-6 font-mono font-bold text-slate-600">FIR-{f.id}</td>
+                                  <td className="py-4 px-6 font-bold text-slate-800">
+                                    {f.citizen_name || `Citizen ID: ${f.citizen_id}`}
+                                  </td>
+                                  <td className="py-4 px-6">{getStatusBadge(f.status)}</td>
+                                  <td className="py-4 px-6">{getPriorityBadge(f.priority)}</td>
+                                </tr>
+                              ))
+                            ) : (
+                              <tr>
+                                <td colSpan={4} className="py-12 text-center text-xs text-slate-400 font-semibold">
+                                  No FIR complaints currently registered in database.
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )
               )}
 
               {activeTab === 'criminals' && (
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8 items-start">
                   {/* Suspect Registry Table */}
-                  <Card className="lg:col-span-2 bg-white border border-[#E2E8F0]">
+                  <Card className="lg:col-span-2 bg-white border border-[#E2E8F0] overflow-hidden">
                     <CardHeader className="border-b border-[#E2E8F0]">
                       <CardTitle className="text-sm font-bold flex items-center gap-2">
                         <UserCheck className="w-4 h-4 text-purple-600" /> Suspect Criminal History Registry
@@ -932,8 +1498,8 @@ export const PoliceDashboard: React.FC = () => {
                     </CardHeader>
                     <CardContent className="p-0">
                       {criminals.length > 0 ? (
-                        <div className="overflow-x-auto">
-                          <table className="w-full text-left text-xs">
+                        <div className="overflow-x-auto w-full">
+                          <table className="w-full text-left text-xs min-w-[600px]">
                             <thead>
                               <tr className="bg-slate-50 border-b border-[#E2E8F0] text-slate-500 font-bold uppercase">
                                 <th className="py-3 px-6">Suspect ID</th>
@@ -1060,7 +1626,7 @@ export const PoliceDashboard: React.FC = () => {
               )}
 
               {activeTab === 'roster' && (
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8 items-start">
                   {/* Deployed Officers */}
                   <Card className="lg:col-span-2 bg-white border border-[#E2E8F0]">
                     <CardHeader className="border-b border-[#E2E8F0]">
@@ -1070,13 +1636,13 @@ export const PoliceDashboard: React.FC = () => {
                     </CardHeader>
                     <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-6">
                       {officers.map(o => (
-                        <div key={o.id} className="bg-white border border-[#E2E8F0] rounded-xl p-4 flex flex-col justify-between h-[120px] shadow-sm">
-                          <div className="flex justify-between items-start">
-                            <div>
-                              <h4 className="text-sm font-bold text-slate-800">{o.name}</h4>
-                              <p className="text-[10px] text-slate-400 font-bold uppercase">{o.rank} | Badge: {o.badge_number}</p>
+                        <div key={o.id} className="bg-white border border-[#E2E8F0] rounded-xl p-4 flex flex-col justify-between min-h-[120px] h-auto shadow-sm gap-2">
+                          <div className="flex justify-between items-start gap-2">
+                            <div className="min-w-0">
+                              <h4 className="text-sm font-bold text-slate-800 truncate">{o.name}</h4>
+                              <p className="text-[10px] text-slate-400 font-bold uppercase truncate">{o.rank} | Badge: {o.badge_number}</p>
                             </div>
-                            <span className={`px-2 py-0.5 text-[9px] font-bold rounded-full ${o.status === 'Available' ? 'bg-emerald-50 text-emerald-600 border border-emerald-200' : o.status === 'On Patrol' ? 'bg-blue-50 text-blue-600 border border-blue-200' : 'bg-slate-50 text-slate-500 border border-slate-200'}`}>
+                            <span className={`px-2 py-0.5 text-[9px] font-bold rounded-full shrink-0 ${o.status === 'Available' ? 'bg-emerald-50 text-emerald-600 border border-emerald-200' : o.status === 'On Patrol' ? 'bg-blue-50 text-blue-600 border border-blue-200' : 'bg-slate-50 text-slate-500 border border-slate-200'}`}>
                               {o.status}
                             </span>
                           </div>
@@ -1142,9 +1708,9 @@ export const PoliceDashboard: React.FC = () => {
               )}
 
               {activeTab === 'challans' && (
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8 items-start">
                   {/* Challan table */}
-                  <Card className="lg:col-span-2 bg-white border border-[#E2E8F0]">
+                  <Card className="lg:col-span-2 bg-white border border-[#E2E8F0] overflow-hidden">
                     <CardHeader className="border-b border-[#E2E8F0]">
                       <CardTitle className="text-sm font-bold flex items-center gap-2">
                         <CreditCard className="w-4.5 h-4.5 text-[#1E40AF]" /> Traffic violation challan Logs
@@ -1152,12 +1718,13 @@ export const PoliceDashboard: React.FC = () => {
                     </CardHeader>
                     <CardContent className="p-0">
                       {challans.length > 0 ? (
-                        <div className="overflow-x-auto">
-                          <table className="w-full text-left text-xs">
+                        <div className="overflow-x-auto w-full">
+                          <table className="w-full text-left text-xs min-w-[500px]">
                             <thead>
                               <tr className="bg-slate-50 border-b border-[#E2E8F0] text-slate-500 font-bold uppercase">
                                 <th className="py-3 px-6">Challan ID</th>
                                 <th className="py-3 px-6">Vehicle No</th>
+                                <th className="py-3 px-6">Reason</th>
                                 <th className="py-3 px-6">Fined User</th>
                                 <th className="py-3 px-6">Fine Amount</th>
                                 <th className="py-3 px-6">Status</th>
@@ -1168,6 +1735,7 @@ export const PoliceDashboard: React.FC = () => {
                                 <tr key={c.id} className="hover:bg-slate-50/50 transition-colors">
                                   <td className="py-3.5 px-6 font-mono font-bold text-slate-500">#CH-{c.id}</td>
                                   <td className="py-3.5 px-6 font-bold text-slate-800">{c.vehicle_no}</td>
+                                  <td className="py-3.5 px-6 text-slate-600">{c.reason || 'Traffic Violation'}</td>
                                   <td className="py-3.5 px-6 text-slate-600">{c.user_name || `Anonymous (ID ${c.user_id})`}</td>
                                   <td className="py-3.5 px-6 text-amber-600 font-extrabold">₹{c.amount}</td>
                                   <td className="py-3.5 px-6">
@@ -1190,7 +1758,7 @@ export const PoliceDashboard: React.FC = () => {
                   <Card className="bg-white border border-[#E2E8F0]">
                     <CardHeader className="border-b border-[#E2E8F0]">
                       <CardTitle className="text-sm font-bold flex items-center gap-2">
-                        <Plus className="w-4 h-4 text-[#1E40AF]" /> Issue Traffic Challan
+                        <Plus className="w-4.5 h-4.5 text-[#1E40AF]" /> Issue Traffic Challan
                       </CardTitle>
                     </CardHeader>
                     <CardContent className="pt-6">
@@ -1203,6 +1771,18 @@ export const PoliceDashboard: React.FC = () => {
                             placeholder="E.g., KA-03-MX-8432"
                             value={challanVehicle}
                             onChange={(e) => setChallanVehicle(e.target.value)}
+                            className="border-slate-200"
+                          />
+                        </div>
+
+                        <div className="space-y-1">
+                          <label className="text-xs font-bold text-slate-600">Violation Reason</label>
+                          <Input
+                            type="text"
+                            required
+                            placeholder="E.g., Speeding, No Helmet, Illegal Parking"
+                            value={challanReason}
+                            onChange={(e) => setChallanReason(e.target.value)}
                             className="border-slate-200"
                           />
                         </div>
@@ -1242,8 +1822,8 @@ export const PoliceDashboard: React.FC = () => {
 
               {activeTab === 'reports' && (
                 <div className="space-y-6">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <Card className="bg-white border border-[#E2E8F0] p-6 flex flex-col h-[360px]">
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <Card className="bg-white border border-[#E2E8F0] p-6 flex flex-col h-[300px] sm:h-[360px]">
                       <h4 className="text-xs font-extrabold text-slate-700 mb-6 uppercase tracking-wider">Crime Category Distribution</h4>
                       <div className="flex-1 w-full">
                         <ResponsiveContainer width="100%" height="100%">
@@ -1257,7 +1837,7 @@ export const PoliceDashboard: React.FC = () => {
                       </div>
                     </Card>
 
-                    <Card className="bg-white border border-[#E2E8F0] p-6 flex flex-col h-[360px]">
+                    <Card className="bg-white border border-[#E2E8F0] p-6 flex flex-col h-[300px] sm:h-[360px]">
                       <h4 className="text-xs font-extrabold text-slate-700 mb-6 uppercase tracking-wider">Officer Workload caseloads</h4>
                       <div className="flex-1 w-full">
                         <ResponsiveContainer width="100%" height="100%">

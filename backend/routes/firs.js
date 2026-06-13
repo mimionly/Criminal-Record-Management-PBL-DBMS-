@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { authenticateToken, authorizeRoles } = require('../middleware/auth');
 const firModel = require('../models/firModel');
+const { sendSMS } = require('../utils/twilio');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
@@ -135,13 +136,130 @@ router.put('/:id/status', authenticateToken, authorizeRoles('police'), async (re
   try {
     await firModel.updateFIRStatus(id, status, remarks);
     
-    const io = req.app.get('socketio');
-    if (io) io.emit('db_change', { table: 'firs' });
+    // Fetch FIR details for notification mapping
+    const fir = await firModel.getFIRById(id);
+    if (fir) {
+      const io = req.app.get('socketio');
+      if (io) {
+        io.emit('db_change', { table: 'firs' });
+        // Emit real-time status update to target citizen
+        io.emit('fir_status_update', {
+          firId: fir.id,
+          citizenId: fir.citizen_id,
+          title: fir.title,
+          status: fir.status,
+          remarks: remarks
+        });
+      }
+
+      // Check if status is Resolved or underway to trigger Twilio SMS
+      const underwayStatuses = ['Under Review', 'Verified', 'Investigation Started'];
+      const resolvedStatuses = ['Resolved'];
+      
+      if (fir.citizen_phone) {
+        if (resolvedStatuses.includes(status)) {
+          const body = `Hello ${fir.citizen_name}, your complaint FIR-${fir.id} '${fir.title}' has been successfully Resolved. The police precinct has closed the file. Remarks: ${remarks}`;
+          sendSMS(fir.citizen_phone, body).catch(e => console.error('SMS send error:', e));
+        } else if (underwayStatuses.includes(status)) {
+          const body = `Hello ${fir.citizen_name}, investigation is underway for your complaint FIR-${fir.id} '${fir.title}'. Current status: ${status}. Remarks: ${remarks}`;
+          sendSMS(fir.citizen_phone, body).catch(e => console.error('SMS send error:', e));
+        }
+      }
+    }
 
     return res.status(200).json({ message: 'FIR status and remarks updated successfully.' });
   } catch (error) {
     console.error('Error updating FIR status:', error);
     return res.status(500).json({ error: 'Failed to update FIR status.' });
+  }
+});
+
+// 4. Update FIR priority (Police only)
+router.put('/:id/priority', authenticateToken, authorizeRoles('police'), async (req, res) => {
+  const { id } = req.params;
+  const { priority } = req.body;
+  if (!priority) {
+    return res.status(400).json({ error: 'Priority is required.' });
+  }
+  const allowedPriorities = ['Low', 'Medium', 'High', 'Emergency'];
+  if (!allowedPriorities.includes(priority)) {
+    return res.status(400).json({ error: 'Invalid priority.' });
+  }
+  try {
+    await firModel.updateFIRPriority(id, priority);
+    const io = req.app.get('socketio');
+    if (io) io.emit('db_change', { table: 'firs' });
+    return res.status(200).json({ message: 'FIR priority updated successfully.' });
+  } catch (error) {
+    console.error('Error updating FIR priority:', error);
+    return res.status(500).json({ error: 'Failed to update FIR priority.' });
+  }
+});
+
+// 5. Update FIR investigation notes (Police only)
+router.put('/:id/notes', authenticateToken, authorizeRoles('police'), async (req, res) => {
+  const { id } = req.params;
+  const { notes } = req.body;
+  try {
+    await firModel.updateFIRInvestigationNotes(id, notes || null);
+    const io = req.app.get('socketio');
+    if (io) io.emit('db_change', { table: 'firs' });
+    return res.status(200).json({ message: 'FIR investigation notes updated successfully.' });
+  } catch (error) {
+    console.error('Error updating FIR notes:', error);
+    return res.status(500).json({ error: 'Failed to update FIR notes.' });
+  }
+});
+
+// 6. Get comments for an FIR (Authenticated users)
+router.get('/:id/comments', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const comments = await firModel.getCommentsByFIRId(id);
+    return res.status(200).json(comments);
+  } catch (error) {
+    console.error('Error fetching comments:', error);
+    return res.status(500).json({ error: 'Failed to fetch comments.' });
+  }
+});
+
+// 7. Add a comment to an FIR (Authenticated users)
+router.post('/:id/comments', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const { comment } = req.body;
+  if (!comment) {
+    return res.status(400).json({ error: 'Comment text is required.' });
+  }
+  try {
+    await firModel.addComment(id, req.user.id, comment);
+    const io = req.app.get('socketio');
+    if (io) io.emit('db_change', { table: 'fir_comments' });
+    return res.status(201).json({ message: 'Comment posted successfully.' });
+  } catch (error) {
+    console.error('Error adding comment:', error);
+    return res.status(500).json({ error: 'Failed to add comment.' });
+  }
+});
+
+// 8. Assign officer / Link suspect criminal dynamically (Police only)
+router.put('/:id/assign', authenticateToken, authorizeRoles('police'), async (req, res) => {
+  const { id } = req.params;
+  const { officerId, criminalId, remarks, status } = req.body;
+  try {
+    const caseModel = require('../models/caseModel');
+    const caseId = await caseModel.upsertCase({
+      firId: parseInt(id, 10),
+      officerId: officerId ? parseInt(officerId, 10) : undefined,
+      criminalId: criminalId ? parseInt(criminalId, 10) : undefined,
+      remarks: remarks || undefined,
+      status: status || undefined
+    });
+    const io = req.app.get('socketio');
+    if (io) io.emit('db_change', { table: 'cases' });
+    return res.status(200).json({ message: 'Docket updated successfully.', caseId });
+  } catch (error) {
+    console.error('Error updating case docket:', error);
+    return res.status(500).json({ error: 'Failed to update case assignment.' });
   }
 });
 

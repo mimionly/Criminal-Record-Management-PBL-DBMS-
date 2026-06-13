@@ -84,8 +84,9 @@ const authenticateToken = async (req, res, next) => {
       user = { ...existingEmailUser, clerk_id: clerkId, role: dbRole };
     } else {
       try {
-        const newUserId = await userModel.createUser({ clerkId, name, email, role });
-        user = { id: newUserId, name, email, role, clerk_id: clerkId };
+        const phone = clerkUser.phoneNumbers?.[0]?.phoneNumber || null;
+        const newUserId = await userModel.createUser({ clerkId, name, email, role, phone });
+        user = { id: newUserId, name, email, role, clerk_id: clerkId, phone };
       } catch (err) {
         if (err.code === 'ER_DUP_ENTRY') {
           // Retrieve the user inserted concurrently by another parallel request

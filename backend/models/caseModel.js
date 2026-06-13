@@ -61,7 +61,66 @@ const getAllCases = async () => {
   return rows;
 };
 
+/**
+ * Creates or updates a case docket linked to an FIR.
+ * @param {Object} details
+ * @param {number} details.firId
+ * @param {number|null} details.officerId
+ * @param {number|null} details.criminalId
+ * @param {string|null} details.remarks
+ * @param {string|null} details.status
+ * @returns {Promise<number>} Case ID.
+ */
+const upsertCase = async ({ firId, officerId, criminalId, remarks, status }) => {
+  const [existing] = await pool.query('SELECT id FROM cases WHERE fir_id = ?', [firId]);
+  
+  if (existing.length > 0) {
+    const fields = [];
+    const values = [];
+    
+    if (officerId !== undefined) {
+      fields.push('officer_id = ?');
+      values.push(officerId);
+    }
+    if (criminalId !== undefined) {
+      fields.push('criminal_id = ?');
+      values.push(criminalId);
+    }
+    if (remarks !== undefined) {
+      fields.push('remarks = ?');
+      values.push(remarks);
+    }
+    if (status !== undefined) {
+      fields.push('status = ?');
+      values.push(status);
+    }
+    
+    if (fields.length > 0) {
+      values.push(firId);
+      await pool.query(
+        `UPDATE cases SET ${fields.join(', ')} WHERE fir_id = ?`,
+        values
+      );
+    }
+    return existing[0].id;
+  } else {
+    const [result] = await pool.query(
+      'INSERT INTO cases (fir_id, officer_id, criminal_id, remarks, status) VALUES (?, ?, ?, ?, ?)',
+      [firId, officerId || null, criminalId || null, remarks || null, status || 'Active']
+    );
+    
+    // Auto transition FIR status to 'Under Review'
+    await pool.query(
+      "UPDATE firs SET status = 'Under Review' WHERE id = ?",
+      [firId]
+    );
+    
+    return result.insertId;
+  }
+};
+
 module.exports = {
   createCase,
-  getAllCases
+  getAllCases,
+  upsertCase
 };

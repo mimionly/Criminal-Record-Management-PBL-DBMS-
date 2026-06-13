@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS users (
     clerk_id VARCHAR(255) UNIQUE NULL,
     name VARCHAR(255) NOT NULL,
     email VARCHAR(255) UNIQUE NOT NULL,
-   
+    phone VARCHAR(50) NULL DEFAULT NULL,
     role ENUM('citizen', 'police', 'inspector', 'admin') DEFAULT 'citizen',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -37,6 +37,8 @@ CREATE TABLE IF NOT EXISTS firs (
     remarks TEXT NULL,
     accused_name VARCHAR(255) NULL,
     evidence_url VARCHAR(255) NULL,
+    priority ENUM('Low', 'Medium', 'High', 'Emergency') DEFAULT 'Low',
+    investigation_notes TEXT NULL DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (citizen_id) REFERENCES users(id) ON DELETE CASCADE
 );
@@ -87,4 +89,15 @@ CREATE TABLE IF NOT EXISTS emergency_requests (
     status ENUM('Active', 'Dispatched', 'Resolved') DEFAULT 'Active',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+-- 8. FIR Comments Table
+CREATE TABLE IF NOT EXISTS fir_comments (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    fir_id INT NOT NULL,
+    user_id INT NOT NULL,
+    comment TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (fir_id) REFERENCES firs(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
