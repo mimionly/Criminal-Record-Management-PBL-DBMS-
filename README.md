@@ -199,3 +199,5 @@ To run the entire database, backend, and frontend stack inside isolated containe
 - **Backend Service (Web Service)**: Link Git, set **Root Directory** to `backend`, **Build Command** to `npm install`, **Start Command** to `node server.js`, and add env secrets.
 - **Frontend Service (Static Site)**: Link Git, set **Root Directory** to `frontend`, **Build Command** to `npm install && npm run build`, and **Publish Directory** to `dist`.
 - **API Rewrites**: Under the Frontend Static Site dashboard, add a **Redirects/Rewrites** rule mapping source `/api/*` to rewrite destination `https://your-backend.onrender.com/api/*` (status `200`).
+
+DBMS PBL 
